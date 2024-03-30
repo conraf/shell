@@ -6,7 +6,7 @@ Name the .sh file as you want then move it to **/usr/local/bin/**
 
 ## +x permission:
 
-chmod **+x filename.sh**
+**chmod +x filename.sh**
 
 ## Usage:
 
