@@ -1,4 +1,4 @@
-# Welcome to my .sh files!
+# My .sh files:
 
 ## Path
 
