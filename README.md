@@ -2,7 +2,7 @@
 
 ## Path:
 
-Name the .sh file as you want then move it to **/usr/local/bin/**
+Name the **.sh** file as you want then move it to **/usr/local/bin/**
 
 ## +x permission:
 
@@ -23,4 +23,4 @@ Suggested names:
 ## On macOS with Homebrew:
 
 The path is **/usr/local/bin/** for Intel-based Macs and **/opt/homebrew/bin** for Apple Silicon Macs.
-Then chmod +x as usual.
+Then **chmod +x** as usual.
