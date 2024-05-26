@@ -20,6 +20,8 @@ Suggested names:
 
 **derem14** = detox_and_remove_last_14_digits.sh (install **detox** first)
 
+**yta** = yta.sh (simple program to extract audio from video sources and adjust the speed; install **yt-dlp** first)
+
 ## On macOS with Homebrew:
 
 The path is **/usr/local/bin/** for Intel-based Macs and **/opt/homebrew/bin** for Apple Silicon Macs.
