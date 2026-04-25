@@ -1,0 +1,96 @@
+#!/bin/bash
+# ───────────────────────────────────────────────────
+# Script per applicare un filtro tempo 
+# a file audio/video e convertirli in MP3.
+# ───────────────────────────────────────────────────
+
+# Controlla se ffmpeg è installato
+if ! command -v ffmpeg &> /dev/null; then
+    echo "🎧 Errore: ffmpeg non è installato. Installalo e riprova."
+    exit 1
+fi
+
+# Formati supportati
+SUPPORTED="mp3|wav|flac|ogg|aiff|m4a|mp4|mkv|avi|mov|webm"
+
+# Raccoglie i file da processare
+files=()
+
+if [ $# -eq 0 ]; then
+    # Nessun argomento: chiede il path
+    read -p "🎧 Inserisci il path del file audio: " input_file
+    input_file="${input_file//\"/}"
+    input_file="${input_file## }"
+    input_file="${input_file%% }"
+    files+=("$input_file")
+else
+    # Uno o più file passati come argomenti (incluso il caso "speeda *")
+    for arg in "$@"; do
+        files+=("$arg")
+    done
+fi
+
+# Chiede il valore del filtro tempo
+read -p "🎧 Inserisci il valore del filtro tempo (es. 1.5 = 150%): " tempo_filter
+
+# Valida il valore
+if ! [[ "$tempo_filter" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+    echo "🎧 Valore non valido. Inserisci un numero (es. 1.5)."
+    exit 1
+fi
+
+if (( $(echo "$tempo_filter < 0.5" | bc -l) )) || (( $(echo "$tempo_filter > 100.0" | bc -l) )); then
+    echo "🎧 Attenzione: il valore deve essere compreso tra 0.5 e 100.0."
+    exit 1
+fi
+
+# Elabora ogni file
+errors=0
+processed=0
+
+for input_file in "${files[@]}"; do
+
+    # Controlla se il file esiste
+    if [ ! -f "$input_file" ]; then
+        echo "🎧 File non trovato, salto: $input_file"
+        ((errors++))
+        continue
+    fi
+
+    # Controlla il formato
+    ext="${input_file##*.}"
+    ext_lower=$(echo "$ext" | tr '[:upper:]' '[:lower:]')
+    if [[ ! "$ext_lower" =~ ^($SUPPORTED)$ ]]; then
+        echo "🎧 Formato non supportato, salto: $input_file ($ext)"
+        ((errors++))
+        continue
+    fi
+
+    # Costruisce il path di output
+    filename=$(basename "$input_file")
+    name="${filename%.*}"
+    output_dir="$(dirname "$(realpath "$input_file")")"
+    new_filename="${name}_${tempo_filter}x.mp3"
+    full_output_path="$output_dir/$new_filename"
+
+    echo "🎧 Elaborazione: $filename → $new_filename"
+
+    ffmpeg -i "$input_file" -af "atempo=$tempo_filter" -vn -acodec libmp3lame -ab 192k "$full_output_path" -loglevel error
+
+    if [ $? -ne 0 ]; then
+        echo "🎧 Errore durante l'elaborazione di $filename."
+        ((errors++))
+    else
+        echo "🎧 Salvato in: $full_output_path"
+        ((processed++))
+    fi
+
+done
+
+# Messaggio finale
+echo ""
+if [ $errors -eq 0 ]; then
+    echo "🎧 Elaborazione completata! File processati: $processed"
+else
+    echo "🎧 Elaborazione completata. Processati: $processed, errori: $errors"
+fi
