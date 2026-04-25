@@ -1,0 +1,155 @@
+#!/usr/bin/env zsh
+
+# ─────────────────────────────────────────────
+#  yta — scarica audio da un video YouTube
+# ─────────────────────────────────────────────
+
+setopt nullglob
+
+# ── Colori e stili ──────────────────────────
+BOLD=$'\e[1m'
+DIM=$'\e[2m'
+RESET=$'\e[0m'
+GREEN=$'\e[32m'
+YELLOW=$'\e[33m'
+CYAN=$'\e[36m'
+RED=$'\e[31m'
+MAGENTA=$'\e[35m'
+
+# ── Banner ───────────────────────────────────
+echo ""
+echo "${CYAN}${BOLD}  🎵  yt-mp3${RESET}"
+echo "${DIM}  Scarica l'audio di un video YouTube in MP3 320k${RESET}"
+echo ""
+
+# ── Controllo dipendenze ─────────────────────
+missing=()
+for cmd in yt-dlp ffmpeg detox; do
+  if ! command -v "$cmd" &>/dev/null; then
+    missing+=("$cmd")
+  fi
+done
+
+if [[ ${#missing[@]} -gt 0 ]]; then
+  echo "${RED}❌  Dipendenze mancanti: ${missing[*]}${RESET}"
+  echo "${DIM}   Installa con: brew install ${missing[*]}${RESET}"
+  echo ""
+  exit 1
+fi
+
+# ── Input URL ────────────────────────────────
+echo -n "${YELLOW}🔗  Incolla il link al video YouTube: ${RESET}"
+read VIDEO_URL
+
+if [[ -z "$VIDEO_URL" ]]; then
+  echo "${RED}❌  Nessun URL inserito. Uscita.${RESET}"
+  exit 1
+fi
+
+# ── Cartella di destinazione ─────────────────
+DEFAULT_DIR="$HOME/Music/yt-mp3"
+echo ""
+echo -n "${YELLOW}📁  Cartella di destinazione ${DIM}[invio = predefinita]${RESET}${YELLOW}: ${RESET}"
+echo "${DIM}${DEFAULT_DIR}${RESET}"
+echo -n "    > "
+read CUSTOM_DIR
+
+if [[ -z "$CUSTOM_DIR" ]]; then
+  DOWNLOAD_DIR="$DEFAULT_DIR"
+else
+  DOWNLOAD_DIR="${CUSTOM_DIR/#\~/$HOME}"
+fi
+
+mkdir -p "$DOWNLOAD_DIR"
+
+echo ""
+echo "${CYAN}📂  Salvataggio in:${RESET} ${BOLD}$DOWNLOAD_DIR${RESET}"
+echo ""
+echo "${MAGENTA}⬇️   Download in corso...${RESET}"
+echo ""
+
+# ── Download audio grezzo ────────────────────
+yt-dlp \
+  --format "bestaudio" \
+  --output "$DOWNLOAD_DIR/%(title)s [%(id)s].%(ext)s" \
+  --no-playlist \
+  --ignore-errors \
+  --no-warnings \
+  --progress \
+  "$VIDEO_URL"
+
+downloaded=("$DOWNLOAD_DIR"/*)
+if [[ ${#downloaded[@]} -eq 0 ]]; then
+  echo ""
+  echo "${RED}❌  Nessun file scaricato. Controlla l'URL e riprova.${RESET}"
+  exit 1
+fi
+
+echo ""
+echo "${MAGENTA}🔧  Pulizia ID YouTube dal nome file...${RESET}"
+
+# ── Rimozione ID YouTube PRIMA del detox ─────
+for f in "$DOWNLOAD_DIR"/*; do
+  [[ -f "$f" ]] || continue
+  dir="${f:h}"
+  base="${f:t}"
+  ext="${base:e}"
+  name="${base:r}"
+
+  new_name="${name% \[[A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-]\]}"
+
+  if [[ "$new_name" != "$name" ]]; then
+    mv "$f" "$dir/${new_name}.${ext}" 2>/dev/null
+  fi
+done
+
+echo "${MAGENTA}🔧  Applicazione detox al nome file...${RESET}"
+
+# ── Detox ─────────────────────────────────────
+detox "$DOWNLOAD_DIR"/* 2>/dev/null
+
+echo "${MAGENTA}🎛️   Conversione in MP3 320kbps...${RESET}"
+echo ""
+
+# ── Conversione in MP3 320k con ffmpeg ───────
+converted=0
+errors=0
+
+for f in "$DOWNLOAD_DIR"/*; do
+  [[ -f "$f" ]] || continue
+  ext_lower="${(L)${f:e}}"
+
+  if [[ "$ext_lower" == "mp3" ]]; then
+    echo "   🎧  ${DIM}${f:t}${RESET} → ${CYAN}già MP3, skip${RESET}"
+    (( converted++ ))
+    continue
+  fi
+
+  out="${f:r}.mp3"
+  echo -n "   🎧  ${DIM}${f:t}${RESET} → "
+
+  ffmpeg -i "$f" -vn -ab 320k -ar 44100 -y "$out" -loglevel error 2>/dev/null
+
+  if [[ $? -eq 0 ]]; then
+    rm -f "$f"
+    echo "${GREEN}✓ MP3${RESET}"
+    (( converted++ ))
+  else
+    echo "${RED}✗ errore conversione${RESET}"
+    (( errors++ ))
+  fi
+done
+
+# ── Riepilogo ─────────────────────────────────
+mp3_file=$(print -l "$DOWNLOAD_DIR"/*.mp3(N) | tail -1)
+mp3_name="${mp3_file:t}"
+
+echo ""
+echo "${GREEN}${BOLD}✅  Completato!${RESET}"
+echo ""
+[[ -n "$mp3_name" ]] && echo "   🎧  File:         ${BOLD}${mp3_name}${RESET}"
+[[ $errors -gt 0 ]]  && echo "   ⚠️   Errori:       ${YELLOW}${errors}${RESET}"
+echo ""
+echo "${CYAN}📂  Path cartella:${RESET}"
+echo "    ${BOLD}$DOWNLOAD_DIR${RESET}"
+echo ""
