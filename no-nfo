@@ -1,0 +1,24 @@
+#!/bin/zsh
+# ───────────────────────────────────────────────────────
+# Elenca tutte le sottocartelle (a qualsiasi profondità)
+# della directory passata come argomento
+# che non contengono alcun file .nfo.
+# ───────────────────────────────────────────────────────
+
+if [[ $# -ne 1 ]]; then
+  echo "Usage: $0 <directory>"
+  exit 1
+fi
+
+SEARCH_DIR=$1
+
+if [[ ! -d $SEARCH_DIR ]]; then
+  echo "Directory not found: $SEARCH_DIR"
+  exit 1
+fi
+
+for dir in $SEARCH_DIR/**/*(/:); do
+  if [[ -z $(echo $dir/*.nfo(N)) ]]; then
+    echo "$dir"
+  fi
+done

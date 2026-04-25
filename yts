@@ -1,0 +1,127 @@
+#!/bin/zsh
+# ────────────────────────────────────────────────────────────────────
+# yts → Scarica solo sottotitoli + detox + pulizia ottimizzata per LLM
+# ────────────────────────────────────────────────────────────────────
+
+# Funzione helper: converte SRT in TXT pulito per LLM
+_yts_to_txt() {
+    local srtfile="$1"
+    awk '!/^[0-9]+$/' "$srtfile" |
+    awk '!/^[0-9]{2}:[0-9]{2}:[0-9]{2},[0-9]{3} -->/' |
+    sed 's/<[^>]*>//g' |
+    awk 'NF' |
+    awk '!seen[$0]++' |
+    tr '\n' ' ' |
+    sed 's/  */ /g' |
+    sed 's/[.!?] */&\n\n/g' |
+    perl -0pe 's/(Dr|Mr|Mrs|Ms|Prof|Sr|Jr|etc|e\.g|i\.e|vs|cf|approx)\.\n\n/$1. /g' |
+    sed 's/^ *//; s/ *$//'
+}
+
+print -P "%F{cyan}%B=== yts → Scarica solo sottotitoli ===%b%f"
+print -P "%F{blue}Cartella corrente: %F{white}$(pwd)%f\n"
+
+# === Scelta percorso di salvataggio ===
+print -P "%F{magenta}Dove vuoi salvare il file?%f"
+print "  1) Cartella predefinita: ~/Desktop/SOTTOTITOLI"
+print "  2) Inserisci un percorso personalizzato"
+read "choice?Scelta [1]: "
+choice=${choice:-1}
+
+case "$choice" in
+    1)
+        savedir="$HOME/Desktop/SOTTOTITOLI"
+        ;;
+    2)
+        read "savedir?Incolla qui il percorso di destinazione: "
+        savedir="${savedir/#\~/$HOME}"
+        if [[ -z "$savedir" ]]; then
+            print -P "%F{red}❌ Percorso vuoto, annullato.%f"
+            exit 1
+        fi
+        ;;
+    *)
+        print -P "%F{yellow}⚠️  Scelta non valida → uso la cartella predefinita%f"
+        savedir="$HOME/Desktop/SOTTOTITOLI"
+        ;;
+esac
+
+# Crea la cartella se non esiste
+if [[ ! -d "$savedir" ]]; then
+    print -P "%F{yellow}→ La cartella non esiste, la creo: $savedir%f"
+    mkdir -p "$savedir" || {
+        print -P "%F{red}❌ Impossibile creare la cartella.%f"
+        exit 1
+    }
+fi
+
+cd "$savedir" || {
+    print -P "%F{red}❌ Impossibile accedere a $savedir%f"
+    exit 1
+}
+print -P "%F{blue}→ Salvataggio in: %F{white}$savedir%f\n"
+
+# === Input interattivi ===
+read "lang?Lingua (es. it, en, es) [en]: "
+lang=${lang:-en}
+
+read "url?URL del video: "
+if [[ -z "$url" ]]; then
+    print -P "%F{red}❌ URL vuoto, annullato.%f"
+    exit 1
+fi
+
+read "fmt?Formato? (txt/srt) [txt]: "
+fmt=${fmt:-txt}
+fmt=${fmt:l}
+if [[ "$fmt" != "txt" && "$fmt" != "srt" ]]; then
+    print -P "%F{yellow}⚠️  Formato non riconosciuto → uso txt%f"
+    fmt="txt"
+fi
+
+print -P "%F{yellow}→ Scarico sottotitoli in lingua: $lang ...%f"
+yt-dlp --skip-download \
+       --write-subs \
+       --write-auto-subs \
+       --sub-lang "$lang" \
+       --convert-subs srt \
+       "$url"
+
+# Glob qualifier zsh: file .srt ordinato per data modifica desc, primo elemento
+# (N) = nullglob: se non ci sono match, l'array resta vuoto invece di dare errore
+srtfiles=( *.srt(.Nom) )
+if (( ${#srtfiles} == 0 )); then
+    print -P "%F{red}⚠️  Nessun file .srt trovato.%f"
+    exit 1
+fi
+srtfile="${srtfiles[1]}"
+
+# Detox del nome file (con fallback se non installato)
+if (( $+commands[detox] )); then
+    print "→ Detox del nome file..."
+    detox "$srtfile"
+    srtfiles=( *.srt(.Nom) )
+    srtfile="${srtfiles[1]}"
+else
+    print -P "%F{yellow}⚠️  detox non trovato, nome file invariato.%f"
+fi
+
+videoname="${srtfile%.srt}"
+cleanfile="${videoname}_clean.${fmt}"
+
+if [[ "$fmt" == "txt" ]]; then
+    print "→ Creazione file TXT pulito per LLM..."
+    _yts_to_txt "$srtfile" > "$cleanfile"
+    print "→ Eliminazione file SRT originale..."
+    rm "$srtfile"
+else
+    print "→ Mantengo il file SRT con timecode..."
+    mv "$srtfile" "$cleanfile"
+fi
+
+print
+print -P "%F{green}%B✅ Operazione completata con successo!%b%f"
+print -P "%F{white}   Video        : %F{cyan}$videoname%f"
+print -P "%F{white}   Formato      : %F{yellow}$fmt%f"
+print -P "%F{white}   Cartella     : %F{white}$savedir%f"
+print -P "%F{white}   File salvato : %F{green}$cleanfile%f"

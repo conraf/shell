@@ -1,0 +1,12 @@
+#!/bin/zsh
+# ───────────────────────────────────────────────────
+# Per ogni file nella cartella corrente,
+# crea una sottocartella con lo stesso nome 
+# (senza estensione) e ci sposta il file dentro.
+# Utile per organizzare raccolte di file sparsi.
+# ───────────────────────────────────────────────────
+for file in *(.); do
+  dir=${file:r}
+  mkdir -p "$dir"
+  mv "$file" "$dir"
+done

@@ -1,0 +1,71 @@
+#!/bin/zsh
+# ────────────────────────────────────────────
+# ytp – YouTube Portion Downloader: 
+# scarica una porzione di video e la velocizza
+# ────────────────────────────────────────────
+
+# --- Input ---
+print
+print "🎬 ytp - YouTube Portion Downloader"
+print "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+read "url?📎 URL del video: "
+if [[ -z "$url" ]]; then
+    print "❌ URL vuoto, annullato."
+    exit 1
+fi
+
+read "tc_start?⏱️  Timecode inizio (es. 00:01:30): "
+read "tc_end?⏱️  Timecode fine   (es. 00:05:45): "
+
+read "speed?⚡ Velocità (invio per 1.5x): "
+speed=${speed:-1.5}
+
+read "filename?💾 Nome file output (senza estensione): "
+if [[ -z "$filename" ]]; then
+    print "❌ Nome file vuoto, annullato."
+    exit 1
+fi
+
+print
+print "⬇️  Download in corso..."
+
+# --- Download con yt-dlp ---
+tmp_file="ytp_tmp_$$"
+yt-dlp \
+    --download-sections "*${tc_start}-${tc_end}" \
+    -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]" \
+    -o "/tmp/${tmp_file}.%(ext)s" \
+    "$url"
+
+# Trova il file scaricato in /tmp (glob qualifier zsh)
+downloaded_files=( /tmp/${tmp_file}.*(.N) )
+if (( ${#downloaded_files} == 0 )); then
+    print "❌ Errore: download fallito."
+    exit 1
+fi
+downloaded="${downloaded_files[1]}"
+
+ext="${downloaded##*.}"
+output="${PWD}/${filename}.${ext}"
+
+# --- Velocizzazione con ffmpeg ---
+print "⚡ Velocizzazione a ${speed}x..."
+ffmpeg -i "$downloaded" \
+    -filter:v "setpts=PTS/${speed}" \
+    -filter:a "atempo=${speed}" \
+    -c:v libx264 -preset fast -c:a aac \
+    "$output" -y -loglevel error
+
+# Pulizia file temporaneo
+rm -f "$downloaded"
+
+if [[ -f "$output" ]]; then
+    print
+    print "✅ Operazione completata con successo!"
+    print "📁 ${output}"
+    print
+else
+    print "❌ Errore durante la velocizzazione."
+    exit 1
+fi

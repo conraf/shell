@@ -1,0 +1,12 @@
+#!/bin/zsh
+# ────────────────────────────────────────────────────────────────────
+# yt1080 – prende SEMPRE 299 (1080p60) + 140 quando esistono,
+#          altrimenti il miglior video ≤1080 possibile (qualsiasi fps)
+# ────────────────────────────────────────────────────────────────────
+
+yt-dlp "$@" \
+  -f "299+140/299+bestaudio/bestvideo[height<=1080]+bestaudio[ext=m4a]/best" \
+  --merge-output-format mp4 \
+  --no-quiet \
+  --progress \
+  --print $'after_move:\n✅ Download completato\n📁 %(filepath)s'

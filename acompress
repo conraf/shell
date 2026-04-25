@@ -1,0 +1,132 @@
+#!/bin/zsh
+# ─────────────────────────────────────────────────────────
+# acompress — Audio compressor to target size (macOS / zsh)
+# ─────────────────────────────────────────────────────────
+
+print
+print -P "%B%F{cyan}[AUDIO] acompress — Audio Size Compressor%f%b"
+print -P "%F{8}─────────────────────────────────────%f"
+print
+
+# 1. File di input
+print -P "%F{cyan}📂  Path del file audio di input:%f"
+read -r "INPUT_PATH?   › "
+INPUT_PATH="${INPUT_PATH/#\~/$HOME}"
+# Rimuove eventuali apici/virgolette intorno e spazi ai bordi
+INPUT_PATH="${INPUT_PATH#[\"\']}"
+INPUT_PATH="${INPUT_PATH%[\"\']}"
+INPUT_PATH="${INPUT_PATH## }"
+INPUT_PATH="${INPUT_PATH%% }"
+
+if [[ ! -f "$INPUT_PATH" ]]; then
+    print -P "%F{red}✗  File non trovato: $INPUT_PATH%f"
+    exit 1
+fi
+
+# 2. Conversione mono
+print
+print -P "%F{cyan}🔊  Convertire in mono? (riduce ulteriormente il peso) [Y/n]:%f"
+read -r "MONO_CHOICE?   › "
+if [[ "$MONO_CHOICE" =~ ^[Nn]$ ]]; then
+    MONO_FLAG=()
+    MONO_LABEL="stereo (invariato)"
+else
+    MONO_FLAG=(-ac 1)
+    MONO_LABEL="mono"
+fi
+
+# 3. Dimensione target
+print
+print -P "%F{cyan}📦  Dimensione finale desiderata in MB (es. 5 o 2.5):%f"
+read -r "TARGET_MB?   › "
+
+if ! [[ "$TARGET_MB" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+    print -P "%F{red}✗  Inserisci un numero valido (es. 5 o 2.5)%f"
+    exit 1
+fi
+
+# 4. Nome file output
+INPUT_DIR="$(cd "$(dirname "$INPUT_PATH")" && pwd)"
+INPUT_NAME="$(basename "$INPUT_PATH")"
+INPUT_EXT="${INPUT_NAME##*.}"
+INPUT_NAME="${INPUT_NAME%.*}"
+
+DEFAULT_OUTPUT="${INPUT_DIR}/${INPUT_NAME}_circa${TARGET_MB}MB.${INPUT_EXT}"
+
+print
+print -P "%F{cyan}💾  Nome file di output:%f"
+print -P "%F{8}   Lascia vuoto per usare il default:%f"
+print -P "%F{8}   ${DEFAULT_OUTPUT}%f"
+read -r "CUSTOM_OUTPUT?   › "
+
+if [[ -z "$CUSTOM_OUTPUT" ]]; then
+    OUTPUT_PATH="$DEFAULT_OUTPUT"
+else
+    CUSTOM_OUTPUT="${CUSTOM_OUTPUT/#\~/$HOME}"
+    CUSTOM_OUTPUT="${CUSTOM_OUTPUT#[\"\']}"
+    CUSTOM_OUTPUT="${CUSTOM_OUTPUT%[\"\']}"
+    [[ "$CUSTOM_OUTPUT" != /* ]] && CUSTOM_OUTPUT="${INPUT_DIR}/${CUSTOM_OUTPUT}"
+    [[ "$CUSTOM_OUTPUT" != *.* ]] && CUSTOM_OUTPUT="${CUSTOM_OUTPUT}.${INPUT_EXT}"
+    OUTPUT_PATH="$CUSTOM_OUTPUT"
+fi
+
+# Calcolo bitrate
+print
+print -P "%F{yellow}⏳  Analisi del file in corso...%f"
+
+DURATION=$(ffprobe -v error -show_entries format=duration \
+    -of default=noprint_wrappers=1:nokey=1 "$INPUT_PATH" 2>/dev/null)
+
+if [[ -z "$DURATION" ]]; then
+    print -P "%F{red}✗  Impossibile leggere la durata. È un file audio valido?%f"
+    exit 1
+fi
+
+BITRATE=$(echo "($TARGET_MB * 8192) / $DURATION" | bc)
+DURATION_MIN=$(echo "scale=1; $DURATION / 60" | bc)
+
+print
+print -P "%F{8}─────────────────────────────────────%f"
+print -P "  %BFile:%b     $(basename "$INPUT_PATH")"
+print -P "  %BDurata:%b   ${DURATION_MIN} min"
+print -P "  %BCanali:%b   ${MONO_LABEL}"
+print -P "  %BTarget:%b   ${TARGET_MB} MB"
+print -P "  %BBitrate:%b  ${BITRATE}k"
+print -P "  %BOutput:%b   ${OUTPUT_PATH}"
+print -P "%F{8}─────────────────────────────────────%f"
+print
+
+# Conferma
+print -P "%F{yellow}▶  Avviare la compressione? [Y/n]:%f"
+read -r "CONFIRM?   › "
+if [[ "$CONFIRM" =~ ^[Nn]$ ]]; then
+    print -P "%F{8}  Annullato.%f"
+    exit 0
+fi
+
+# Esecuzione ffmpeg
+print
+print -P "%F{yellow}🔄  Compressione in corso...%f"
+print
+
+ffmpeg -loglevel warning -stats \
+    -i "$INPUT_PATH" \
+    "${MONO_FLAG[@]}" \
+    -b:a "${BITRATE}k" \
+    "$OUTPUT_PATH" \
+    -y 2>&1
+EXIT_CODE=$?
+
+if [[ $EXIT_CODE -eq 0 && -f "$OUTPUT_PATH" ]]; then
+    FINAL_SIZE=$(du -sh "$OUTPUT_PATH" | cut -f1)
+    print
+    print -P "%F{green}✅  Completato!%f"
+    print -P "%F{8}─────────────────────────────────────%f"
+    print -P "  %B📁  Salvato in:%b   ${OUTPUT_PATH}"
+    print -P "  %B📦  Dimensione:%b   ${FINAL_SIZE}"
+    print -P "%F{8}─────────────────────────────────────%f"
+    print
+else
+    print -P "%F{red}✗  Qualcosa è andato storto durante la compressione.%f"
+    exit 1
+fi
