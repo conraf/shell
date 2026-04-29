@@ -1,0 +1,202 @@
+#!/usr/bin/env zsh
+
+# ── Colori (sfondo scuro) ────────────────────────────────────────────────────
+R=$'\e[0m'
+BOLD=$'\e[1m'
+DIM=$'\e[2m'
+CYAN=$'\e[38;5;81m'
+BLUE=$'\e[38;5;75m'
+GREEN=$'\e[38;5;82m'
+YELLOW=$'\e[38;5;220m'
+RED=$'\e[38;5;203m'
+GRAY=$'\e[38;5;244m'
+
+DOCLING_BIN="$HOME/.local/bin/docling"
+docling_pid=""
+
+_cleanup() {
+  printf '\033[?25h'
+  [[ -n "$docling_pid" ]] && kill "$docling_pid" 2>/dev/null
+  rm -f "/tmp/todomd_$$.log"
+  printf "\n\n  ${YELLOW}⚠ Interrotto.${R}\n\n"
+  exit 1
+}
+trap '_cleanup' INT TERM
+
+# ── Help ─────────────────────────────────────────────────────────────────────
+if [[ "${1}" == "-h" || "${1}" == "--help" ]]; then
+  printf "\n${BOLD}${CYAN}  ◆ todomd${R}  → Markdown via docling + ocrmac\n\n"
+  printf "  ${BOLD}Uso:${R}\n"
+  printf "    ${CYAN}todomd${R} file [file2 ...]\n"
+  printf "    ${CYAN}todomd${R}                     chiede il path interattivamente\n\n"
+  printf "  ${BOLD}Formati supportati:${R}\n"
+  printf "    PDF, DOCX, PPTX, XLSX, HTML, TXT, immagini (PNG, JPEG, TIFF), LaTeX e altri\n\n"
+  printf "  ${BOLD}Interattivo:${R}\n"
+  printf "    · Selezione lingua OCR (it, en, fr, de, es, pt)\n"
+  printf "    · Placeholder per le immagini (predefinito: sì)\n\n"
+  printf "  ${BOLD}Note:${R}\n"
+  printf "    · Output salvato nella stessa cartella del file sorgente\n"
+  printf "    · Ctrl+C interrompe in qualsiasi momento\n\n"
+  exit 0
+fi
+
+# ── Header ───────────────────────────────────────────────────────────────────
+printf "\n${BOLD}${CYAN}  ◆ todomd  → Markdown${R}\n"
+printf "${GRAY}  ─────────────────────────────────${R}\n\n"
+
+# ── Raccolta file ─────────────────────────────────────────────────────────────
+typeset -a input_files=("$@")
+
+if [[ ${#input_files[@]} -eq 0 ]]; then
+  printf "  ${YELLOW}📂 Path del file: ${R}"
+  read -r file_input
+  if [[ -z "$file_input" ]]; then
+    printf "\n  ${RED}Nessun file specificato. Uscita.${R}\n\n"
+    exit 1
+  fi
+  file_input="${file_input/#\~/$HOME}"
+  input_files=("$file_input")
+fi
+
+# ── Validazione file ──────────────────────────────────────────────────────────
+typeset -a valid_files
+for f in "${input_files[@]}"; do
+  f="${f/#\~/$HOME}"
+  if [[ -f "$f" ]]; then
+    valid_files+=("${f:A}")
+  else
+    printf "  ${RED}✗ File non trovato:${R} %s\n" "$f"
+  fi
+done
+
+if [[ ${#valid_files[@]} -eq 0 ]]; then
+  printf "\n  ${RED}Nessun file valido. Uscita.${R}\n\n"
+  exit 1
+fi
+
+printf "  ${BLUE}📄 File:${R}\n"
+for f in "${valid_files[@]}"; do
+  printf "  ${GRAY}     ·${R} %s\n" "${f:t}"
+done
+printf "\n"
+
+# ── Selezione lingua ──────────────────────────────────────────────────────────
+typeset -a lang_codes lang_labels
+lang_codes=(it-IT  en-US    fr-FR    de-DE    es-ES    pt-BR)
+lang_labels=(
+  "🇮🇹  Italiano   [it-IT]"
+  "🇬🇧  English    [en-US]"
+  "🇫🇷  Français   [fr-FR]"
+  "🇩🇪  Deutsch    [de-DE]"
+  "🇪🇸  Español    [es-ES]"
+  "🇧🇷  Português  [pt-BR]"
+)
+
+printf "  ${BOLD}${BLUE}🌐 Lingua dei documenti:${R}\n"
+for i in {1..${#lang_codes[@]}}; do
+  if [[ $i -eq 1 ]]; then
+    printf "     ${CYAN}%d)${R} %s  ${GREEN}← predefinito${R}\n" $i "${lang_labels[$i]}"
+  else
+    printf "     ${CYAN}%d)${R} %s\n" $i "${lang_labels[$i]}"
+  fi
+done
+printf "\n"
+printf "  ${GRAY}Scelta [1]: ${R}"
+read -r lang_choice
+lang_choice=${lang_choice:-1}
+[[ "$lang_choice" =~ ^[1-6]$ ]] || lang_choice=1
+selected_lang="${lang_codes[$lang_choice]}"
+printf "  ${GREEN}✓${R} %s\n\n" "${lang_labels[$lang_choice]}"
+
+# ── Placeholder immagini ──────────────────────────────────────────────────────
+printf "  ${BOLD}${BLUE}🖼️  Placeholder per le immagini?${R} ${GRAY}[S/n]: ${R}"
+read -r img_choice
+img_choice=${img_choice:-S}
+printf "\n"
+if [[ "${img_choice:u}" == "N" ]]; then
+  use_placeholder=false
+  printf "  ${GREEN}✓${R} Immagini incluse nel documento\n"
+else
+  use_placeholder=true
+  printf "  ${GREEN}✓${R} Placeholder attivato\n"
+fi
+
+printf "\n${GRAY}  ─────────────────────────────────${R}\n"
+
+# ── Conversioni ───────────────────────────────────────────────────────────────
+typeset -a output_files failed_files
+typeset -a spinner_frames=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
+
+for f in "${valid_files[@]}"; do
+  dir="${f:h}"
+  name="${f:t:r}"
+  outfile="${dir}/${name}.md"
+  log="/tmp/todomd_$$.log"
+
+  printf "\n  ${YELLOW}◈${R} ${BOLD}%s${R}\n" "${f:t}"
+
+  if [[ -f "$outfile" ]]; then
+    printf "  ${YELLOW}⚠ Il file esiste già: %s${R}\n" "${outfile:t}"
+    printf "  ${GRAY}  Sovrascrivere? [s/N]: ${R}"
+    read -r overwrite_choice
+    if [[ "${overwrite_choice:l}" != "s" ]]; then
+      printf "  ${GRAY}  Saltato.${R}\n"
+      continue
+    fi
+  fi
+
+  typeset -a cmd_args=(--ocr-engine ocrmac --ocr-lang "$selected_lang" --output "$dir")
+  if $use_placeholder; then
+    cmd_args+=(--image-export-mode placeholder)
+  fi
+  cmd_args+=("$f")
+
+  "$DOCLING_BIN" "${cmd_args[@]}" >"$log" 2>&1 &
+  docling_pid=$!
+
+  printf '\033[?25l'
+  spin_i=0
+  while kill -0 $docling_pid 2>/dev/null; do
+    printf "\r  ${GRAY}  %s elaborazione...${R}" "${spinner_frames[$((spin_i % 10 + 1))]}"
+    sleep 0.12
+    (( spin_i++ ))
+  done
+  wait $docling_pid
+  printf '\033[?25h\033[2K\r'
+
+  if [[ -f "$outfile" ]]; then
+    printf "  ${GREEN}  ✔ Completato${R}\n"
+    output_files+=("$outfile")
+  else
+    printf "  ${RED}  ✗ Errore nella conversione${R}\n"
+    grep -i "error" "$log" | grep -v "Loading weights" | head -3 | while IFS= read -r line; do
+      printf "    ${DIM}${RED}%s${R}\n" "$line"
+    done
+    failed_files+=("$f")
+  fi
+  rm -f "$log"
+done
+
+# ── Riepilogo ─────────────────────────────────────────────────────────────────
+printf "\n${GRAY}  ─────────────────────────────────${R}\n\n"
+
+if [[ ${#output_files[@]} -gt 0 ]]; then
+  if [[ ${#output_files[@]} -eq 1 ]]; then
+    printf "${BOLD}${GREEN}  ✦ Conversione completata!${R}\n\n"
+  else
+    printf "${BOLD}${GREEN}  ✦ Conversioni completate! (%d/%d)${R}\n\n" \
+      ${#output_files[@]} ${#valid_files[@]}
+  fi
+  for f in "${output_files[@]}"; do
+    printf "  ${CYAN}→${R} %s\n" "$f"
+  done
+fi
+
+if [[ ${#failed_files[@]} -gt 0 ]]; then
+  printf "\n${BOLD}${RED}  ✗ File non convertiti:${R}\n"
+  for f in "${failed_files[@]}"; do
+    printf "  ${RED}  · %s${R}\n" "${f:t}"
+  done
+fi
+
+printf "\n"
