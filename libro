@@ -44,8 +44,9 @@ read_int() {
 read_numlist() {
     local prompt="$1" val clean
     read -rp "$prompt" val
-    # Rimuove spazi e normalizza separatori
-    clean=$(echo "$val" | tr -d ' ' | tr ',' ' ' | tr -s ' ')
+    # Accetta qualsiasi separatore del tastierino numerico:
+    # virgola, punto, trattino, barra, più, spazio — o combinazioni miste
+    clean=$(echo "$val" | tr ',. -/+' ' ' | tr -s ' ' | sed 's/^ //;s/ $//')
     echo "$clean"
 }
 
@@ -95,17 +96,25 @@ if [ ! -f "salti.txt" ]; then
     PRIMA_PARI=$(read_int "  Prima pagina scansionata (numero fisico del libro): ")
     echo ""
     info "✂️  Pagine saltate durante la scansione"
-    echo "  Inserisci un numero per volta e premi Invio. Invio vuoto per terminare."
+    echo "  Puoi inserire un numero per volta oppure incollarli tutti insieme."
+    echo "  Separatori accettati: spazio, virgola, punto, trattino, barra, più."
+    echo "  Invio vuoto per terminare."
     ALL_SALTI=""
     while true; do
-        read -rp "  Pagina saltata (o Invio per terminare): " n
-        [[ -z "$n" ]] && break
-        if ! [[ "$n" =~ ^[0-9]+$ ]]; then
-            echo -e "${RED}  Inserisci solo numeri interi.${NC}"
-            continue
-        fi
-        ALL_SALTI="$ALL_SALTI $n"
-        echo -e "${GREEN}  ✔ Aggiunta: $n  |  finora: ${ALL_SALTI# }${NC}"
+        read -rp "  Pagina/e saltata/e (o Invio per terminare): " input
+        [[ -z "$input" ]] && break
+        # Normalizza qualsiasi separatore in spazi e itera sui token
+        tokens=$(echo "$input" | tr ',. -/+' ' ' | tr -s ' ' | sed 's/^ //;s/ $//')
+        valid=0
+        for n in $tokens; do
+            if ! [[ "$n" =~ ^[0-9]+$ ]]; then
+                echo -e "${RED}  Ignorato '${n}': non è un numero intero.${NC}"
+                continue
+            fi
+            ALL_SALTI="$ALL_SALTI $n"
+            (( valid++ ))
+        done
+        [[ $valid -gt 0 ]] && echo -e "${GREEN}  ✔ Aggiunte $valid pagine  |  finora: ${ALL_SALTI# }${NC}"
     done
     ALL_SALTI="${ALL_SALTI# }"
     # Separa automaticamente pari e dispari
