@@ -3,7 +3,7 @@
 # yts → Scarica solo sottotitoli + detox + pulizia ottimizzata per LLM
 # ────────────────────────────────────────────────────────────────────
 
-# Funzione helper: converte SRT in TXT pulito per LLM
+# Funzione helper: converte SRT in testo pulito per LLM
 _yts_to_txt() {
     local srtfile="$1"
     awk '!/^[0-9]+$/' "$srtfile" |
@@ -27,7 +27,6 @@ print "  1) Cartella predefinita: ~/Desktop/SOTTOTITOLI"
 print "  2) Inserisci un percorso personalizzato"
 read "choice?Scelta [1]: "
 choice=${choice:-1}
-
 case "$choice" in
     1)
         savedir="$HOME/Desktop/SOTTOTITOLI"
@@ -54,7 +53,6 @@ if [[ ! -d "$savedir" ]]; then
         exit 1
     }
 fi
-
 cd "$savedir" || {
     print -P "%F{red}❌ Impossibile accedere a $savedir%f"
     exit 1
@@ -71,13 +69,25 @@ if [[ -z "$url" ]]; then
     exit 1
 fi
 
-read "fmt?Formato? (txt/srt) [txt]: "
-fmt=${fmt:-txt}
-fmt=${fmt:l}
-if [[ "$fmt" != "txt" && "$fmt" != "srt" ]]; then
-    print -P "%F{yellow}⚠️  Formato non riconosciuto → uso txt%f"
-    fmt="txt"
-fi
+# === Selezione formato output ===
+print
+print -P "%F{blue}%BFormato di output:%b%f"
+print -P "   %F{cyan}1)%f 📝  Markdown   [.md]   %F{green}← predefinito%f"
+print -P "   %F{cyan}2)%f 📄  Testo puro [.txt]"
+print -P "   %F{cyan}3)%f 🕐  SRT        [.srt]  (con timecode)"
+print
+read "fmt_choice?Scelta [1]: "
+fmt_choice=${fmt_choice:-1}
+
+case "$fmt_choice" in
+    1) fmt="md"  ;;
+    2) fmt="txt" ;;
+    3) fmt="srt" ;;
+    *)
+        print -P "%F{yellow}⚠️  Scelta non valida → uso md%f"
+        fmt="md"
+        ;;
+esac
 
 print -P "%F{yellow}→ Scarico sottotitoli in lingua: $lang ...%f"
 yt-dlp --skip-download \
@@ -88,7 +98,6 @@ yt-dlp --skip-download \
        "$url"
 
 # Glob qualifier zsh: file .srt ordinato per data modifica desc, primo elemento
-# (N) = nullglob: se non ci sono match, l'array resta vuoto invece di dare errore
 srtfiles=( *.srt(.Nom) )
 if (( ${#srtfiles} == 0 )); then
     print -P "%F{red}⚠️  Nessun file .srt trovato.%f"
@@ -109,8 +118,12 @@ fi
 videoname="${srtfile%.srt}"
 cleanfile="${videoname}_clean.${fmt}"
 
-if [[ "$fmt" == "txt" ]]; then
-    print "→ Creazione file TXT pulito per LLM..."
+if [[ "$fmt" == "md" || "$fmt" == "txt" ]]; then
+    if [[ "$fmt" == "md" ]]; then
+        print "→ Creazione file Markdown pulito per LLM..."
+    else
+        print "→ Creazione file TXT pulito per LLM..."
+    fi
     _yts_to_txt "$srtfile" > "$cleanfile"
     print "→ Eliminazione file SRT originale..."
     rm "$srtfile"
