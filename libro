@@ -1,0 +1,229 @@
+#!/usr/bin/env bash
+# =============================================================================
+# libro — Unisce Pari.pdf e Dispari.pdf in un unico PDF interleaved
+# Dipendenze: poppler  (brew install poppler)
+# Uso: ./libro
+# =============================================================================
+
+set -euo pipefail
+
+# ── Colori ────────────────────────────────────────────────────────────────────
+RED='\033[0;31m'; GREEN='\033[0;32m'; CYAN='\033[0;36m'
+YELLOW='\033[1;33m'; BOLD='\033[1m'; NC='\033[0m'
+info()    { echo -e "${CYAN}▶ ${NC}$*"; }
+success() { echo -e "${GREEN}✅ ${NC}$*"; }
+warn()    { echo -e "${YELLOW}⚠️  ${NC}$*"; }
+error()   { echo -e "${RED}❌ ERRORE: ${NC}$*" >&2; exit 1; }
+
+echo -e "\n${BOLD}╔══════════════════════════════════════╗${NC}"
+echo -e "${BOLD}║      📖  LIBRO — PDF Interleaver     ║${NC}"
+echo -e "${BOLD}╚══════════════════════════════════════╝${NC}\n"
+
+# ── Controllo dipendenze ──────────────────────────────────────────────────────
+command -v pdfseparate &>/dev/null || error "🍺 'pdfseparate' non trovato. Installa con: brew install poppler"
+command -v pdfunite    &>/dev/null || error "🍺 'pdfunite' non trovato. Installa con: brew install poppler"
+
+# ── Controllo file di input ───────────────────────────────────────────────────
+[ -f "Pari.pdf" ]    || error "File non trovato: Pari.pdf"
+[ -f "Dispari.pdf" ] || error "File non trovato: Dispari.pdf"
+success "Trovato: Pari.pdf 📄"
+success "Trovato: Dispari.pdf 📄"
+echo ""
+
+# ── Funzione: leggi intero positivo ──────────────────────────────────────────
+read_int() {
+    local prompt="$1" val
+    while true; do
+        read -rp "$prompt" val
+        [[ "$val" =~ ^[0-9]+$ ]] && echo "$val" && return
+        echo -e "${RED}  Inserisci un numero intero positivo.${NC}"
+    done
+}
+
+# ── Funzione: leggi lista di numeri (o vuota) ────────────────────────────────
+read_numlist() {
+    local prompt="$1" val clean
+    read -rp "$prompt" val
+    # Rimuove spazi e normalizza separatori
+    clean=$(echo "$val" | tr -d ' ' | tr ',' ' ' | tr -s ' ')
+    echo "$clean"
+}
+
+# ── Funzione: parsing salti.txt ───────────────────────────────────────────────
+parse_salti() {
+    PRIMA_DISPARI=$(grep "^prima_dispari=" salti.txt | cut -d= -f2 | tr -d ' ')
+    PRIMA_PARI=$(grep "^prima_pari="    salti.txt | cut -d= -f2 | tr -d ' ')
+    SALTI_DISPARI=$(grep "^salti_dispari=" salti.txt | cut -d= -f2 | tr -d ' ' | tr ',' ' ')
+    SALTI_PARI=$(grep "^salti_pari="    salti.txt | cut -d= -f2 | tr -d ' ' | tr ',' ' ')
+}
+
+# ── Funzione: scrivi salti.txt ────────────────────────────────────────────────
+write_salti() {
+    {
+        echo "# File generato da 'libro' — modificabile manualmente"
+        echo "# Numeri di pagina fisici del libro (come stampati)"
+        echo ""
+        echo "prima_dispari=$PRIMA_DISPARI"
+        echo "prima_pari=$PRIMA_PARI"
+        echo "salti_dispari=$(echo "$SALTI_DISPARI" | tr ' ' ',')"
+        echo "salti_pari=$(echo "$SALTI_PARI" | tr ' ' ',')"
+    } > salti.txt
+}
+
+# ── Acquisizione dati ─────────────────────────────────────────────────────────
+if [ -f "salti.txt" ]; then
+    parse_salti
+    warn "📂 Trovato salti.txt esistente con questi dati:"
+    echo ""
+    echo -e "  Dispari.pdf → prima pagina: ${BOLD}$PRIMA_DISPARI${NC}  |  salti: ${BOLD}${SALTI_DISPARI:-nessuno}${NC}"
+    echo -e "  Pari.pdf    → prima pagina: ${BOLD}$PRIMA_PARI${NC}  |  salti: ${BOLD}${SALTI_PARI:-nessuno}${NC}"
+    echo ""
+    read -rp "  Vuoi usare questi dati? [s/n]: " usa
+    if [[ "$usa" =~ ^[Ss]$ ]]; then
+        info "📂 Uso i dati da salti.txt"
+    else
+        rm salti.txt
+    fi
+    echo ""
+fi
+
+if [ ! -f "salti.txt" ]; then
+    info "🔢 Inserisci i dati per Dispari.pdf"
+    PRIMA_DISPARI=$(read_int "  Prima pagina scansionata (numero fisico del libro): ")
+    echo ""
+    info "🔢 Inserisci i dati per Pari.pdf"
+    PRIMA_PARI=$(read_int "  Prima pagina scansionata (numero fisico del libro): ")
+    echo ""
+    info "✂️  Pagine saltate durante la scansione"
+    echo "  Inserisci un numero per volta e premi Invio. Invio vuoto per terminare."
+    ALL_SALTI=""
+    while true; do
+        read -rp "  Pagina saltata (o Invio per terminare): " n
+        [[ -z "$n" ]] && break
+        if ! [[ "$n" =~ ^[0-9]+$ ]]; then
+            echo -e "${RED}  Inserisci solo numeri interi.${NC}"
+            continue
+        fi
+        ALL_SALTI="$ALL_SALTI $n"
+        echo -e "${GREEN}  ✔ Aggiunta: $n  |  finora: ${ALL_SALTI# }${NC}"
+    done
+    ALL_SALTI="${ALL_SALTI# }"
+    # Separa automaticamente pari e dispari
+    SALTI_PARI=""
+    SALTI_DISPARI=""
+    for n in $ALL_SALTI; do
+        if (( n % 2 == 0 )); then
+            SALTI_PARI="$SALTI_PARI $n"
+        else
+            SALTI_DISPARI="$SALTI_DISPARI $n"
+        fi
+    done
+    SALTI_PARI=$(echo "$SALTI_PARI" | tr -s ' ' | sed 's/^ //')
+    SALTI_DISPARI=$(echo "$SALTI_DISPARI" | tr -s ' ' | sed 's/^ //')
+    echo ""
+
+    # Riepilogo e conferma
+    while true; do
+        echo -e "${BOLD}📋 Riepilogo ─────────────────────────────${NC}"
+        echo -e "  Dispari.pdf → prima pagina: ${BOLD}$PRIMA_DISPARI${NC}  |  salti: ${BOLD}${SALTI_DISPARI:-nessuno}${NC}"
+        echo -e "  Pari.pdf    → prima pagina: ${BOLD}$PRIMA_PARI${NC}  |  salti: ${BOLD}${SALTI_PARI:-nessuno}${NC}"
+        echo ""
+        read -rp "  Confermi? [S/n]: " ok
+        if [[ -z "$ok" || "$ok" =~ ^[Ss]$ ]]; then
+            write_salti
+            success "💾 salti.txt salvato"
+            break
+        else
+            echo ""
+            info "Reinserisci i dati per Dispari.pdf"
+            PRIMA_DISPARI=$(read_int "  Prima pagina scansionata: ")
+            SALTI_DISPARI=$(read_numlist "  Pagine saltate o Invio se nessuna: ")
+            echo ""
+            info "Reinserisci i dati per Pari.pdf"
+            PRIMA_PARI=$(read_int "  Prima pagina scansionata: ")
+            SALTI_PARI=$(read_numlist "  Pagine saltate o Invio se nessuna: ")
+            echo ""
+        fi
+    done
+    echo ""
+fi
+
+# ── Creazione cartelle ────────────────────────────────────────────────────────
+mkdir -p Pari Dispari LIBRO
+info "📁 Create cartelle: Pari/  Dispari/  LIBRO/"
+echo ""
+
+# ── Funzione: estrai e rinomina con numerazione fisica ───────────────────────
+# $1=PDF  $2=cartella  $3=prima pagina fisica  $4=lista salti (separati da spazio)
+extract_and_rename() {
+    local pdf="$1"
+    local dest="$2"
+    local first="$3"
+    local salti="$4"
+    local bname
+    bname="$(basename "$pdf" .pdf)"
+
+    # Estrai tutte le pagine
+    pdfseparate "$pdf" "$dest/pag-%d.pdf"
+
+    # Costruisci lista ordinata dei file estratti
+    local files
+    files=($(ls "$dest"/pag-*.pdf | sort -t- -k2 -n))
+    local total=${#files[@]}
+
+    info "[$bname] Pagine estratte: $total  |  Prima pagina fisica: $first"
+
+    # Rinomina assegnando numeri fisici, saltando i numeri in $salti
+    local page_num=$first
+    local i=0
+    for f in "${files[@]}"; do
+        # Salta i numeri che l'utente ha dichiarato come saltati
+        while [[ " $salti " == *" $page_num "* ]]; do
+            printf "  [saltata] pagina fisica %d\n" "$page_num"
+            (( page_num += 2 ))
+        done
+        local new_name
+        new_name=$(printf "%04d.pdf" "$page_num")
+        mv "$f" "$dest/$new_name"
+        cp "$dest/$new_name" LIBRO/
+        printf "  Pagina %3d → %s\n" $(( i+1 )) "$new_name"
+        (( i++ ))
+        (( page_num += 2 ))
+    done
+
+    success "[$bname] Rinomina completata → $dest/"
+    echo ""
+}
+
+# ── Estrazione e rinomina ─────────────────────────────────────────────────────
+info "⚙️  Estrazione pagine da Dispari.pdf…"
+extract_and_rename "Dispari.pdf" "Dispari" "$PRIMA_DISPARI" "$SALTI_DISPARI"
+
+info "⚙️  Estrazione pagine da Pari.pdf…"
+extract_and_rename "Pari.pdf" "Pari" "$PRIMA_PARI" "$SALTI_PARI"
+
+# ── Unione PDF finale ─────────────────────────────────────────────────────────
+info "🔗 Unione pagine in LIBRO_UNITO.pdf…"
+pdfunite $(ls LIBRO/*.pdf | sort) LIBRO_UNITO.pdf
+success "📖 PDF finale creato: LIBRO_UNITO.pdf"
+echo ""
+
+# ── Riepilogo finale ──────────────────────────────────────────────────────────
+NPARI=$(ls Pari/*.pdf | wc -l | tr -d ' ')
+NDISPARI=$(ls Dispari/*.pdf | wc -l | tr -d ' ')
+NTOT=$(( NPARI + NDISPARI ))
+echo -e "${BOLD}📋 Riepilogo ─────────────────────────────${NC}"
+echo "  Pagine da Pari.pdf:    $NPARI"
+echo "  Pagine da Dispari.pdf: $NDISPARI"
+echo "  Pagine totali:         $NTOT"
+echo ""
+echo "  $(pwd)/"
+echo "  ├── Pari.pdf           (originale)"
+echo "  ├── Dispari.pdf        (originale)"
+echo "  ├── salti.txt          (dati sessione)"
+echo "  ├── LIBRO_UNITO.pdf    ← PDF unificato"
+echo "  ├── Pari/              (pagine pari rinominate)"
+echo "  ├── Dispari/           (pagine dispari rinominate)"
+echo "  └── LIBRO/             (tutte le pagine ordinate)"
+echo ""
+success "🎉 Tutto completato!"
