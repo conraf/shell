@@ -115,6 +115,13 @@ else
     print -P "%F{yellow}⚠️  detox non trovato, nome file invariato.%f"
 fi
 
+# Pulizia aggiuntiva: rimuove | (con eventuali spazi), virgole e due punti
+newname=$(printf '%s' "$srtfile" | sed 's/ *[|｜] *//g; s/ *[,，] *//g; s/ *[：:] *//g; s/  */ /g; s/^ //; s/ $//; s/ /_/g')
+if [[ "$newname" != "$srtfile" ]]; then
+    mv "$srtfile" "$newname"
+    srtfile="$newname"
+fi
+
 videoname="${srtfile%.srt}"
 cleanfile="${videoname}_clean.${fmt}"
 
